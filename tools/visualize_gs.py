@@ -3,16 +3,6 @@ import numpy as np
 from plyfile import PlyData
 
 def load_gaussian_splats_from_ply(ply_path):
-    """
-    Loads 3D Gaussian Splatting data from a .ply file.
-
-    Args:
-        ply_path (str): The path to the .ply file.
-
-    Returns:
-        tuple: A tuple containing arrays for positions, colors, opacities, and scales.
-               Returns (None, None, None, None) if the file cannot be loaded.
-    """
     try:
         plydata = PlyData.read(ply_path)
         vertex = plydata['vertex']
@@ -20,23 +10,19 @@ def load_gaussian_splats_from_ply(ply_path):
         # Extract positions
         positions = np.vstack([vertex['x'], vertex['y'], vertex['z']]).T
 
-        # --- Extract and convert colors ---
-        # The base color is stored in the first three spherical harmonic coefficients (f_dc_*)
-        # We need to apply the SH_C0 constant and shift from [-1, 1] to [0, 1]
+        # Extract and convert colors (RGB)
         SH_C0 = 0.28209479177387814
         sh_features = np.vstack([vertex[f'f_dc_{i}'] for i in range(3)]).T
         colors = 0.5 + SH_C0 * sh_features
-        colors = np.clip(colors, 0.0, 1.0) # Ensure colors are in the [0, 1] range
+        colors = np.clip(colors, 0.0, 1.0)
 
-        # --- Extract and convert opacities ---
-        # The opacity is often stored after a sigmoid activation.
+        # Extract and convert opacities (Alpha)
         if 'opacity' in vertex.data.dtype.names:
             opacities = 1 / (1 + np.exp(-vertex['opacity']))
         else:
-            opacities = np.ones(len(positions)) # Default to fully opaque if not found
+            opacities = np.ones(len(positions))
 
-        # --- Extract scales ---
-        # Scales are often stored after an exponential activation.
+        # Extract scales
         scales = np.vstack([
             np.exp(vertex['scale_0']),
             np.exp(vertex['scale_1']),
@@ -50,45 +36,38 @@ def load_gaussian_splats_from_ply(ply_path):
         print(f"Error loading PLY file: {e}")
         return None, None, None, None
 
+
+def register_pc(name, positions, colors, opacities, scales):
+    # Register the Point Cloud 
+    pc = ps.register_point_cloud(
+        name,
+        positions,
+        transparency = 0.5,
+    )
+
+    # Set a starting point radius. 
+    pc.set_radius(0.00005, relative=True)
+
+    # Add Scalar Quantities
+    avg_scale = np.mean(scales, axis=1)
+    pc.add_scalar_quantity("opacity", opacities, enabled=True)
+    pc.add_scalar_quantity("average_scale", avg_scale, enabled=True, cmap='viridis')
+
+    # Add Colors
+    pc.add_color_quantity("colors", colors, enabled=True)
+
 def main():
-    """
-    Main function to load and visualize the Gaussian splats.
-    """
     ply_file_path = "object_models/hotdog/point_cloud/iteration_30000/point_cloud.ply"
-    # ----------------------------------------------
+    ply_file_path = "scene_models/bicycle/point_cloud/iteration_30000/point_cloud.ply"
 
     positions, colors, opacities, scales = load_gaussian_splats_from_ply(ply_file_path)
-
-    if positions is None:
-        print("Could not load data. Exiting.")
-        return
+    print(positions.shape, colors.shape, opacities.shape, scales.shape)
 
     # Initialize Polyscope
     ps.init()
+    register_pc("TEST", positions, colors, opacities, scales)
 
-    # --- Register the Point Cloud ---
-    # We combine colors and opacities into an RGBA array for transparency.
-    rgba_colors = np.hstack([colors, opacities[:, np.newaxis]])
-
-    # Register the point cloud with its RGBA colors.
-    # 'pretty' transparency mode gives a nice depth-aware feel.
-    pc = ps.register_point_cloud(
-        "Gaussian Splats",
-        positions,
-        color=rgba_colors,
-        transparency_mode='pretty'
-    )
-
-    # Set a starting point radius. You can adjust this in the UI.
-    pc.set_radius(0.002, relative=True)
-
-    # --- Add Scalar Quantities for Inspection ---
-    # This allows you to color the points by their properties in the UI.
-    avg_scale = np.mean(scales, axis=1)
-    pc.add_scalar_quantity("opacity", opacities, enabled=False)
-    pc.add_scalar_quantity("average_scale", avg_scale, enabled=True, cmap='viridis')
-
-    # Show the interactive viewer
+    # Show Visualization
     ps.show()
 
 if __name__ == "__main__":
