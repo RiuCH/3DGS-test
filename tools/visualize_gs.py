@@ -2,65 +2,42 @@ import polyscope as ps
 import numpy as np
 from plyfile import PlyData
 
-def load_gaussian_splats_from_ply(ply_path):
-    try:
-        plydata = PlyData.read(ply_path)
-        vertex = plydata['vertex']
+def load_gs_from_ply(ply_path):
+    """Loads the xyz positions and base colors (f_dc) from a 3DGS .ply file."""
+    plydata = PlyData.read(ply_path)
+    vertex = plydata['vertex']
+    
+    xyz = np.vstack([vertex['x'], vertex['y'], vertex['z']]).T
+    
+    # Extract and convert base color (SH degree 0)
+    SH_C0 = 0.28209479177387814
+    colors = np.vstack([
+        0.5 + SH_C0 * vertex[f'f_dc_0'],
+        0.5 + SH_C0 * vertex[f'f_dc_1'],
+        0.5 + SH_C0 * vertex[f'f_dc_2']
+    ]).T
+    colors = np.clip(colors, 0.0, 1.0)
+    
+    print(f"Loaded {len(xyz)} points from {ply_path}")
+    return xyz, colors
 
-        # Extract positions
-        positions = np.vstack([vertex['x'], vertex['y'], vertex['z']]).T
-
-        # Extract and convert colors (RGB)
-        SH_C0 = 0.28209479177387814
-        sh_features = np.vstack([vertex[f'f_dc_{i}'] for i in range(3)]).T
-        colors = 0.5 + SH_C0 * sh_features
-        colors = np.clip(colors, 0.0, 1.0)
-
-        # Extract and convert opacities (Alpha)
-        if 'opacity' in vertex.data.dtype.names:
-            opacities = 1 / (1 + np.exp(-vertex['opacity']))
-        else:
-            opacities = np.ones(len(positions))
-
-        # Extract scales
-        scales = np.vstack([
-            np.exp(vertex['scale_0']),
-            np.exp(vertex['scale_1']),
-            np.exp(vertex['scale_2'])
-        ]).T
-
-        print(f"Loaded {len(positions)} Gaussian splats.")
-        return positions, colors, opacities, scales
-
-    except Exception as e:
-        print(f"Error loading PLY file: {e}")
-        return None, None, None, None
-
-
-def register_pc(name, positions, colors, opacities, scales):
+def register_pc(name, positions, colors):
     # Register the Point Cloud 
     pc = ps.register_point_cloud(
         name,
         positions,
-        transparency = 0.5,
-    )
+        transparency = 0.5)
 
-    # Set a starting point radius. 
-    pc.set_radius(0.00005, relative=True)
-
-    # Add Scalar Quantities
-    avg_scale = np.mean(scales, axis=1)
-    pc.add_scalar_quantity("opacity", opacities, enabled=True)
-    pc.add_scalar_quantity("average_scale", avg_scale, enabled=True, cmap='viridis')
-
-    # Add Colors
+    pc.set_radius(0.001, relative=True)
     pc.add_color_quantity("colors", colors, enabled=True)
+    return pc
 
 def main():
     ply_file_path = "object_models/hotdog/point_cloud/iteration_30000/point_cloud.ply"
     ply_file_path = "scene_models/bicycle/point_cloud/iteration_30000/point_cloud.ply"
+    ply_file_path = "scene_models/bicycle/point_cloud/iteration_30000/point_cloud_clean.ply"
 
-    positions, colors, opacities, scales = load_gaussian_splats_from_ply(ply_file_path)
+    positions, colors, opacities, scales = load_gs_from_ply(ply_file_path)
     print(positions.shape, colors.shape, opacities.shape, scales.shape)
 
     # Initialize Polyscope
