@@ -6,7 +6,6 @@ from scipy.spatial.transform import Rotation as R
 from plyfile import PlyData, PlyElement
 
 class GaussianData:
-    """A helper class to load and hold all 3DGS attributes."""
     def __init__(self, ply_path):
         plydata = PlyData.read(ply_path)
         vertex = plydata['vertex']
@@ -22,20 +21,81 @@ class GaussianData:
         self.scales = load_prop("scale_")
         self.rotations = load_prop("rot_")
         self.features_dc = load_prop("f_dc_")[..., np.newaxis]
-        self.features_rest = load_prop("f_rest_").reshape((len(self.xyz), -1, 3))
+        self.features_rest = load_prop("f_rest_").reshape((len(self.xyz), 3, -1))
 
-def transform_shs(shs, rotation_matrix):
-    if shs.shape[1] == 0: return shs
-    shs_torch = torch.from_numpy(shs).float()
-    rot_torch = torch.from_numpy(rotation_matrix).float()
-    rotated_shs = torch.zeros_like(shs_torch)
-    for l in range(o3.deg_from_n(shs.shape[1] + 1)):
-        D = o3.wigner_D(l, o3.matrix_to_angles(rot_torch)).to(shs_torch.device)
-        indices = slice(l**2, (l+1)**2)
-        shs_l = einops.rearrange(shs_torch[:, indices, :], 'n c rgb -> n rgb c')
-        rotated_shs_l = einops.einsum(D, shs_l, 'i j, ... j -> ... i')
-        rotated_shs[:, indices, :] = einops.rearrange(rotated_shs_l, 'n rgb c -> n c rgb')
-    return rotated_shs.numpy()
+def transform_shs(features, rotation_matrix):
+    """
+    https://github.com/graphdeco-inria/gaussian-splatting/issues/176#issuecomment-2147223570
+    """
+
+    try:
+        from e3nn import o3
+        import einops
+        from einops import einsum
+    except:
+        print("Please run `pip install e3nn einops` to enable SHs rotation")
+        return features
+
+    if features.shape[1] == 1:
+        return features
+
+    features = torch.from_numpy(features)
+    rotation_matrix = torch.from_numpy(rotation_matrix).to(torch.float32)
+
+    features = features.clone()
+
+    shs_feat = features[:, 1:, :]
+
+    ## rotate shs
+    P = torch.tensor([[0, 0, 1], [1, 0, 0], [0, 1, 0]], dtype=shs_feat.dtype, device=shs_feat.device)  # switch axes: yzx -> xyz
+    inversed_P = torch.tensor([
+        [0, 1, 0],
+        [0, 0, 1],
+        [1, 0, 0],
+    ], dtype=shs_feat.dtype, device=shs_feat.device)
+    
+    permuted_rotation_matrix = inversed_P @ rotation_matrix @ P
+    rot_angles = o3._rotation.matrix_to_angles(permuted_rotation_matrix.cpu())
+
+    # Construction coefficient
+    D_1 = o3.wigner_D(1, rot_angles[0], - rot_angles[1], rot_angles[2]).to(device=shs_feat.device)
+    D_2 = o3.wigner_D(2, rot_angles[0], - rot_angles[1], rot_angles[2]).to(device=shs_feat.device)
+    D_3 = o3.wigner_D(3, rot_angles[0], - rot_angles[1], rot_angles[2]).to(device=shs_feat.device)
+
+    # rotation of the shs features
+    one_degree_shs = shs_feat[:, 0:3]
+    one_degree_shs = einops.rearrange(one_degree_shs, 'n shs_num rgb -> n rgb shs_num')
+    one_degree_shs = einsum(
+        D_1,
+        one_degree_shs,
+        "... i j, ... j -> ... i",
+    )
+    one_degree_shs = einops.rearrange(one_degree_shs, 'n rgb shs_num -> n shs_num rgb')
+    shs_feat[:, 0:3] = one_degree_shs
+
+    if shs_feat.shape[1] >= 4:
+        two_degree_shs = shs_feat[:, 3:8]
+        two_degree_shs = einops.rearrange(two_degree_shs, 'n shs_num rgb -> n rgb shs_num')
+        two_degree_shs = einsum(
+            D_2,
+            two_degree_shs,
+            "... i j, ... j -> ... i",
+        )
+        two_degree_shs = einops.rearrange(two_degree_shs, 'n rgb shs_num -> n shs_num rgb')
+        shs_feat[:, 3:8] = two_degree_shs
+
+        if shs_feat.shape[1] >= 9:
+            three_degree_shs = shs_feat[:, 8:15]
+            three_degree_shs = einops.rearrange(three_degree_shs, 'n shs_num rgb -> n rgb shs_num')
+            three_degree_shs = einsum(
+                D_3,
+                three_degree_shs,
+                "... i j, ... j -> ... i",
+            )
+            three_degree_shs = einops.rearrange(three_degree_shs, 'n rgb shs_num -> n shs_num rgb')
+            shs_feat[:, 8:15] = three_degree_shs
+
+    return features.numpy()
 
 def quat_multiply(q1, q2_wxyz):
     w1, x1, y1, z1 = q1.T
@@ -66,11 +126,14 @@ def save_composition(object_full_data, scene_full_data, state, output_path):
     
     transformed_obj.xyz = transformed_obj.xyz @ rot_matrix.T
     transformed_obj.rotations = quat_multiply(transformed_obj.rotations, rot_quat_wxyz)
+
+    print(transformed_obj.features_dc.shape, transformed_obj.features_rest.shape)
     
-    full_shs = np.concatenate((transformed_obj.features_dc, transformed_obj.features_rest), axis=1)
+    full_shs = np.concatenate((transformed_obj.features_dc, transformed_obj.features_rest), axis=2).transpose((0, 2, 1))
     rotated_shs = transform_shs(full_shs, rot_matrix)
     transformed_obj.features_dc = rotated_shs[:, 0:1, :]
     transformed_obj.features_rest = rotated_shs[:, 1:, :]
+    transformed_obj.features_rest = transformed_obj.features_rest.transpose((0, 2, 1))
     
     transformed_obj.xyz += state["translation"]
     
@@ -79,10 +142,12 @@ def save_composition(object_full_data, scene_full_data, state, output_path):
     temp = state["temperature"] * 0.1
     transformed_obj.features_dc[:, 0, 0] += temp
     transformed_obj.features_dc[:, 0, 2] -= temp
+    transformed_obj.features_dc = transformed_obj.features_dc.transpose((0, 2, 1))
 
     # --- Merge and Save ---
     merged = GaussianData.__new__(GaussianData)
     for attr in ['xyz', 'opacities', 'scales', 'rotations', 'features_dc', 'features_rest']:
+        print(attr, getattr(scene_full_data, attr).shape, getattr(transformed_obj, attr).shape)
         setattr(merged, attr, np.concatenate((getattr(scene_full_data, attr), getattr(transformed_obj, attr)), axis=0))
 
     xyz, f_dc, f_rest = merged.xyz, merged.features_dc.reshape(len(merged.xyz), -1), merged.features_rest.reshape(len(merged.xyz), -1)

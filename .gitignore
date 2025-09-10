@@ -38,7 +38,7 @@ Thumbs.db
 .json
 **__pycache__/
 *.ini
-
+*.ply
 dataset/
 *models/
 view.json
