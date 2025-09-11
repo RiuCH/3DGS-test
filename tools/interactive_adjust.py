@@ -12,11 +12,11 @@ from tools.utils import save_composition, GaussianData
 # ===============================================================
 # --- File Paths ---
 SCENE_FILE_PATH = "scene_models/bicycle/point_cloud/iteration_30000/point_cloud_clean.ply"
-OBJECT_FILE_PATH = "object_models/hotdog/point_cloud/iteration_30000/point_cloud_clean.ply"
+OBJECT_FILE_PATH = "object_models/chair/point_cloud/iteration_30000/point_cloud_clean.ply"
 
 # --- Camera Info for Scale Calculation ---
 SCENE_CAM_FILE_PATH = "dataset/360_v2/bicycle/poses_bounds.npy" # .npy for Mip-NeRF 360
-OBJECT_CAM_FILE_PATH = "dataset/nerf_synthetic/hotdog/transforms_train.json" # .json for NeRF-Synthetic
+OBJECT_CAM_FILE_PATH = "dataset/nerf_synthetic/chair/transforms_train.json" # .json for NeRF-Synthetic
 # ===============================================================
 
 class InteractiveAdjuster:
@@ -46,13 +46,22 @@ class InteractiveAdjuster:
         self.set_scene_range(scene_xyz)
 
         # -- Define State and Interactive Logic ---
+        # self.state = {
+        #     "translation": np.array([0.0, 0.0, 0.0]),
+        #     "rotation_euler": np.array([0.0, 0.0, 0.0]),
+        #     "scale": 1.0,
+        #     "brightness": 0.0,
+        #     "contrast": 1.0,
+        #     "temperature": 0.0,
+        #     "output_path": "merged_pointcloud.ply"
+        # }
         self.state = {
-            "translation": np.array([0.0, 0.0, 0.0]),
-            "rotation_euler": np.array([0.0, 0.0, 90.0]),
-            "scale": 1.0,
-            "brightness": 0.0,
-            "contrast": 1.0,
-            "temperature": 0.0,
+            "translation": np.array([1.35, 1.205, 1.757]),
+            "rotation_euler": np.array([107.191, 28.0, 8.0]),
+            "scale": 0.268,
+            "brightness": -0.173,
+            "contrast": 1.68,
+            "temperature": 0.03,
             "output_path": "merged_pointcloud.ply"
         }
 

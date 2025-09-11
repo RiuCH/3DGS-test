@@ -109,6 +109,7 @@ def quat_multiply(q1, q2_wxyz):
 def save_composition(object_full_data, scene_full_data, state, output_path):
     print("Applying final transformations for saving...")
     obj = object_full_data
+    obj = filter_background_gaussians(obj)
     
     # --- Create a transformed copy of the object's full data ---
     transformed_obj = GaussianData.__new__(GaussianData)
@@ -163,3 +164,32 @@ def save_composition(object_full_data, scene_full_data, state, output_path):
     
     PlyData([PlyElement.describe(elements, 'vertex')]).write(output_path)
     print(f"Successfully saved {len(xyz)} merged Gaussians to {output_path}")
+
+
+def filter_background_gaussians(gaussian_data, color_threshold=0.8, opacity_threshold=0.4):
+
+    print(f"Original object point count: {len(gaussian_data.xyz)}")
+
+    SH_C0 = 0.2820947917738781
+    colors = 0.5 + SH_C0 * gaussian_data.features_dc.squeeze()
+    colors = np.clip(colors, 0.0, 1.0)
+
+    opacities = 1 / (1 + np.exp(-gaussian_data.opacities.squeeze()))
+
+    mask_is_white = (colors[:, 0] > color_threshold) & \
+                    (colors[:, 1] > color_threshold) & \
+                    (colors[:, 2] > color_threshold)
+    
+    mask_is_opacity = opacities > opacity_threshold
+
+    mask_to_remove =  mask_is_opacity | mask_is_white
+    mask_to_keep = ~mask_to_remove
+
+    cleaned_data = GaussianData.__new__(GaussianData)
+    for attr in ['xyz', 'opacities', 'scales', 'rotations', 'features_dc', 'features_rest']:
+        original_attr = getattr(gaussian_data, attr)
+        if original_attr.shape[0] > 0:
+            setattr(cleaned_data, attr, original_attr[mask_to_keep])
+            
+    print(f"Filtered opacity object count: {len(cleaned_data.xyz)}")
+    return cleaned_data

@@ -45,7 +45,7 @@ def calculate_initial_scale(scene_npy_path, object_json_path):
 
 if __name__ == "__main__":
     scene_npy_path = "dataset/360_v2/bicycle/poses_bounds.npy"
-    object_json_path = "dataset/nerf_synthetic/chair/transforms_train.json"
+    object_json_path = "dataset/nerf_synthetic/hotdog/transforms_train.json"
 
     initial_scale = calculate_initial_scale(scene_npy_path, object_json_path)
 
